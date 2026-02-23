@@ -52,6 +52,7 @@
     "@loopback/rest-explorer": "^8.0.10",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^17.3.1",
+    "fuse.js": "^7.1.0",
     "isolated-vm": "^6.0.2",
     "tslib": "^2.0.0"
   },

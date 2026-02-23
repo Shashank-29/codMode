@@ -48,26 +48,72 @@ function createMcpServer(jiraService: JiraService): McpServer {
   // ── Tool: jira_discover ────────────────────────────────────
   server.tool(
     'jira_discover',
-    `Discover your Jira instance: lists project KEYS, issue types, and statuses.
-IMPORTANT: Call this FIRST before jira_search to get the correct project KEY.
-Returns compact data only. For custom fields or components, use code_execution instead.`,
+    `Fuzzy-search your Jira instance for boards, projects, issue types, or statuses.
+IMPORTANT: Every project, sub-project, and POC has a BOARD. Use scope="boards" FIRST to find what you need.
+Boards are the primary organizing unit — they contain the backlog and sprints.
+Once you have a board ID, use code_execution to query its backlog/sprints via the Agile API.
+Handles typos and partial matches. Returns max 5 best matches.
+For custom fields or components, use code_execution instead.`,
     {
       scope: z
-        .enum(['projects', 'issuetypes', 'statuses'])
-        .describe('What to discover: projects (keys+names), issuetypes, or statuses'),
+        .enum(['boards', 'projects', 'issuetypes', 'statuses'])
+        .describe('What to search — use "boards" first (primary), then "projects" if needed'),
+      query: z
+        .string()
+        .describe('Search term — matches against names and keys, tolerates typos'),
     },
-    async ({scope}) => {
+    async ({scope, query}) => {
+      const Fuse = (await import('fuse.js')).default;
       let lines: string[] = [];
+
+      if (scope === 'boards') {
+        // Fetch all boards (paginated, get first 200)
+        const boardsResp = (await jiraService.request(
+          'GET',
+          '/rest/agile/1.0/board?maxResults=200',
+        )) as Record<string, unknown>;
+        const boards = (boardsResp.values || []) as Array<Record<string, unknown>>;
+
+        const fuse = new Fuse(boards, {
+          keys: ['name'],
+          threshold: 0.4,
+          includeScore: true,
+        });
+        const results = fuse.search(query).slice(0, 5);
+
+        if (results.length === 0) {
+          lines = [`No boards matching "${query}". Try a broader search.`];
+        } else {
+          lines = results.map(r => {
+            const loc = r.item.location as Record<string, unknown> | undefined;
+            const projKey = loc?.projectKey || 'unknown';
+            return `Board #${r.item.id}: ${r.item.name} (project: ${projKey}, type: ${r.item.type}) — match: ${Math.round((1 - (r.score || 0)) * 100)}%`;
+          });
+          lines.unshift(`${results.length} board matches for "${query}":`);
+        }
+      }
 
       if (scope === 'projects') {
         const projects = (await jiraService.request(
           'GET',
           '/rest/api/2/project',
         )) as unknown as Array<Record<string, unknown>>;
-        lines = projects.map(
-          (p: Record<string, unknown>) => `${p.key} — ${p.name}`,
-        );
-        lines.unshift(`${projects.length} projects found:`);
+
+        const fuse = new Fuse(projects, {
+          keys: ['key', 'name'],
+          threshold: 0.4,
+          includeScore: true,
+        });
+        const results = fuse.search(query).slice(0, 5);
+
+        if (results.length === 0) {
+          lines = [`No projects matching "${query}". Try a broader search.`];
+        } else {
+          lines = results.map(
+            r => `${r.item.key} — ${r.item.name} (match: ${Math.round((1 - (r.score || 0)) * 100)}%)`,
+          );
+          lines.unshift(`${results.length} matches for "${query}":`);
+        }
       }
 
       if (scope === 'issuetypes') {
@@ -75,11 +121,22 @@ Returns compact data only. For custom fields or components, use code_execution i
           'GET',
           '/rest/api/2/issuetype',
         )) as unknown as Array<Record<string, unknown>>;
-        lines = types.map(
-          (t: Record<string, unknown>) =>
-            `${t.name}${t.subtask ? ' (sub-task)' : ''}`,
-        );
-        lines.unshift(`${types.length} issue types:`);
+
+        const fuse = new Fuse(types, {
+          keys: ['name'],
+          threshold: 0.4,
+          includeScore: true,
+        });
+        const results = fuse.search(query).slice(0, 5);
+
+        if (results.length === 0) {
+          lines = [`No issue types matching "${query}".`];
+        } else {
+          lines = results.map(
+            r => `${r.item.name}${r.item.subtask ? ' (sub-task)' : ''}`,
+          );
+          lines.unshift(`${results.length} matches:`);
+        }
       }
 
       if (scope === 'statuses') {
@@ -87,13 +144,23 @@ Returns compact data only. For custom fields or components, use code_execution i
           'GET',
           '/rest/api/2/status',
         )) as unknown as Array<Record<string, unknown>>;
-        lines = statuses.map(
-          (s: Record<string, unknown>) => {
-            const cat = (s.statusCategory as Record<string, unknown>)?.name || '';
-            return `${s.name} [${cat}]`;
-          },
-        );
-        lines.unshift(`${statuses.length} statuses:`);
+
+        const fuse = new Fuse(statuses, {
+          keys: ['name'],
+          threshold: 0.4,
+          includeScore: true,
+        });
+        const results = fuse.search(query).slice(0, 5);
+
+        if (results.length === 0) {
+          lines = [`No statuses matching "${query}".`];
+        } else {
+          lines = results.map(r => {
+            const cat = (r.item.statusCategory as Record<string, unknown>)?.name || '';
+            return `${r.item.name} [${cat}]`;
+          });
+          lines.unshift(`${results.length} matches:`);
+        }
       }
 
       return {
@@ -203,6 +270,14 @@ COMPONENTS (sub-projects) — discover inside sandbox:
 ISSUE DETAILS with custom fields:
   const issue = await jira_api('GET', '/rest/api/2/issue/MYAPP-123');
   console.log('Story Points: ' + issue.fields.customfield_10001);
+
+BOARDS — get backlog or sprint items for any board (use jira_discover to find the board ID first):
+  const backlog = await jira_api('GET', '/rest/agile/1.0/board/42/backlog');
+  backlog.issues.forEach(i => console.log(i.key + ': ' + i.fields.summary));
+
+  const sprints = await jira_api('GET', '/rest/agile/1.0/board/42/sprint');
+  const active = sprints.values.find(s => s.state === 'active');
+  const sprintIssues = await jira_api('GET', '/rest/agile/1.0/sprint/' + active.id + '/issue');
 
 Use this for multi-step Jira workflows, bulk operations, sprint health, workload reports.
 Timeout: 10s. Memory: 128MB. Write ops require JIRA_READONLY=false.`,
