@@ -67,29 +67,62 @@ For custom fields or components, use code_execution instead.`,
       let lines: string[] = [];
 
       if (scope === 'boards') {
-        // Fetch all boards (paginated, get first 200)
-        const boardsResp = (await jiraService.request(
-          'GET',
-          '/rest/agile/1.0/board?maxResults=200',
-        )) as Record<string, unknown>;
-        const boards = (boardsResp.values || []) as Array<Record<string, unknown>>;
+        let boards: Array<Record<string, unknown>> = [];
 
+        // Strategy 1: If query looks like a project key (ALL CAPS), filter server-side
+        const isProjectKey = /^[A-Z][A-Z0-9_]+$/.test(query);
+        if (isProjectKey) {
+          try {
+            const resp = (await jiraService.request(
+              'GET',
+              `/rest/agile/1.0/board?projectKeyOrId=${query}&maxResults=50`,
+            )) as Record<string, unknown>;
+            boards = (resp.values || []) as Array<Record<string, unknown>>;
+          } catch {
+            // Project key might not match, fall through to name search
+          }
+        }
+
+        // Strategy 2: Search by board name (server-side name filter + fuzzy)
+        if (boards.length === 0) {
+          const resp = (await jiraService.request(
+            'GET',
+            `/rest/agile/1.0/board?name=${encodeURIComponent(query)}&maxResults=50`,
+          )) as Record<string, unknown>;
+          boards = (resp.values || []) as Array<Record<string, unknown>>;
+        }
+
+        // Strategy 3: If still nothing, fetch all and fuzzy search
+        if (boards.length === 0) {
+          const resp = (await jiraService.request(
+            'GET',
+            '/rest/agile/1.0/board?maxResults=200',
+          )) as Record<string, unknown>;
+          boards = (resp.values || []) as Array<Record<string, unknown>>;
+        }
+
+        // Fuzzy filter the results
         const fuse = new Fuse(boards, {
           keys: ['name'],
-          threshold: 0.4,
+          threshold: 0.5,
           includeScore: true,
         });
         const results = fuse.search(query).slice(0, 5);
+        // If fuzzy returned nothing but we got boards from server-side filter, show those
+        const finalResults = results.length > 0
+          ? results.map(r => r.item)
+          : boards.slice(0, 5);
+        const isExact = results.length === 0 && boards.length > 0;
 
-        if (results.length === 0) {
-          lines = [`No boards matching "${query}". Try a broader search.`];
+        if (finalResults.length === 0) {
+          lines = [`No boards matching "${query}". Try a different search term or check project key.`];
         } else {
-          lines = results.map(r => {
-            const loc = r.item.location as Record<string, unknown> | undefined;
-            const projKey = loc?.projectKey || 'unknown';
-            return `Board #${r.item.id}: ${r.item.name} (project: ${projKey}, type: ${r.item.type}) — match: ${Math.round((1 - (r.score || 0)) * 100)}%`;
+          lines = finalResults.map(board => {
+            const loc = board.location as Record<string, unknown> | undefined;
+            const projKey = loc?.projectKey || loc?.projectName || 'unknown';
+            return `Board #${board.id}: ${board.name} (project: ${projKey}, type: ${board.type})`;
           });
-          lines.unshift(`${results.length} board matches for "${query}":`);
+          lines.unshift(`${finalResults.length} board${isExact ? 's' : ' matches'} for "${query}":`);
         }
       }
 
@@ -252,35 +285,34 @@ Note: write operations require JIRA_READONLY=false in .env`,
 Available inside the sandbox:
   - jira_search(jql) — Async, returns array of { key, summary, status, assignee, priority, ... }
   - jira_api(method, path, body) — Async, makes direct Jira REST calls
+  - jira_field(name) — Async, returns cached field ID by name (e.g. jira_field('Story Points') → 'customfield_10002'). Fetches once per session, instant after.
   - console.log(...args) — Captured and returned
 
-IMPORTANT: JQL uses project KEYS not display names. If unsure, first discover:
-  const projects = await jira_api('GET', '/rest/api/2/project');
-  projects.forEach(p => console.log(p.key + ' = ' + p.name));
+CUSTOM FIELDS — use jira_field() for cached lookups (NO repeated API calls):
+  const spId = await jira_field('Story Points');      // → 'customfield_10002'
+  const epicId = await jira_field('Epic Link');        // → 'customfield_10970'
+  const acId = await jira_field('Acceptance Criteria'); // → 'customfield_10777'
+  const issue = await jira_api('GET', '/rest/api/2/issue/KEY');
+  console.log('SP: ' + issue.fields[spId]);
 
-CUSTOM FIELDS (Story Points, Epic Link, etc.) — discover INSIDE the sandbox to avoid context rot:
-  const fields = await jira_api('GET', '/rest/api/2/field');
-  const sp = fields.find(f => f.name === 'Story Points');
-  console.log('Story Points ID: ' + sp.id);  // e.g. customfield_10001
-
-COMPONENTS (sub-projects) — discover inside sandbox:
-  const proj = await jira_api('GET', '/rest/api/2/project/MYAPP');
-  proj.components.forEach(c => console.log(c.name));
-
-ISSUE DETAILS with custom fields:
-  const issue = await jira_api('GET', '/rest/api/2/issue/MYAPP-123');
-  console.log('Story Points: ' + issue.fields.customfield_10001);
-
-BOARDS — get backlog or sprint items for any board (use jira_discover to find the board ID first):
+BOARDS — get backlog or sprint items (use jira_discover to find board ID first):
   const backlog = await jira_api('GET', '/rest/agile/1.0/board/42/backlog');
-  backlog.issues.forEach(i => console.log(i.key + ': ' + i.fields.summary));
-
   const sprints = await jira_api('GET', '/rest/agile/1.0/board/42/sprint');
   const active = sprints.values.find(s => s.state === 'active');
-  const sprintIssues = await jira_api('GET', '/rest/agile/1.0/sprint/' + active.id + '/issue');
 
-Use this for multi-step Jira workflows, bulk operations, sprint health, workload reports.
-Timeout: 10s. Memory: 128MB. Write ops require JIRA_READONLY=false.`,
+COMPONENTS:
+  const proj = await jira_api('GET', '/rest/api/2/project/KEY');
+  proj.components.forEach(c => console.log(c.name));
+
+JIRA MARKUP (NOT Markdown!) — use when writing descriptions or comments:
+  *bold*  _italic_  -strikethrough-  +underline+
+  {code:java}code block{code}  {{inline code}}
+  {noformat}preformatted{noformat}
+  h1. Heading   h2. Subheading
+  * bullet list   # numbered list
+  [link text|http://url]   [~username] (mention)
+
+Timeout: 30s. Memory: 128MB. Write ops require JIRA_READONLY=false.`,
     {
       code: z.string().describe('JavaScript code to execute'),
     },

@@ -19,7 +19,7 @@ export class V8SandboxService {
   private pool: ivm.Isolate[] = [];
   private readonly maxPoolSize = 5;
   private readonly memoryLimitMb = 128;
-  private readonly timeoutMs = 10000; // 10s for Jira (network calls)
+  private readonly timeoutMs = 30000; // 30s for complex Jira workflows
 
   constructor() {
     for (let i = 0; i < 3; i++) {
@@ -70,6 +70,13 @@ export class V8SandboxService {
       );
       await jail.set('_jiraApi', apiRef);
 
+      // Inject jira_field (cached field lookup)
+      const fieldRef = new ivm.Reference(async (fieldName: string) => {
+        const fieldId = await jiraService.getFieldId(fieldName);
+        return fieldId;
+      });
+      await jail.set('_jiraField', fieldRef);
+
       const wrappedCode = `
         const console = {
           log: (...args) => _log.applySync(undefined, args.map(a =>
@@ -87,6 +94,10 @@ export class V8SandboxService {
         async function jira_api(method, path, body) {
           const bodyStr = body ? JSON.stringify(body) : undefined;
           return _jiraApi.apply(undefined, [method, path, bodyStr], { result: { promise: true, copy: true } });
+        }
+
+        async function jira_field(name) {
+          return _jiraField.apply(undefined, [name], { result: { promise: true } });
         }
 
         (async () => {

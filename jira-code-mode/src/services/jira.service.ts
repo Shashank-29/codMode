@@ -24,6 +24,9 @@ export class JiraService {
   private baseUrl: string;
   private pat: string;
   private readonly: boolean;
+  // Per-session field mapping cache: field name → field ID
+  private fieldCache: Map<string, string> = new Map();
+  private fieldCacheLoaded = false;
 
   constructor(baseUrl: string, pat: string) {
     // Remove trailing slash
@@ -33,6 +36,61 @@ export class JiraService {
     console.log(
       `[JiraService] Configured for ${this.baseUrl} (readonly: ${this.readonly})`,
     );
+  }
+
+  /**
+   * Get a custom field ID by name. Uses cache — only calls API once per session.
+   * Returns the field ID (e.g. "customfield_10777") or null if not found.
+   */
+  async getFieldId(fieldName: string): Promise<string | null> {
+    // Check cache first (case-insensitive)
+    const key = fieldName.toLowerCase();
+    if (this.fieldCache.has(key)) {
+      return this.fieldCache.get(key)!;
+    }
+
+    // Load all fields once
+    if (!this.fieldCacheLoaded) {
+      await this.discoverFields();
+    }
+
+    return this.fieldCache.get(key) || null;
+  }
+
+  /**
+   * Return all cached field mappings as { name → id }.
+   */
+  getFieldMappings(): Record<string, string> {
+    const mappings: Record<string, string> = {};
+    this.fieldCache.forEach((id, name) => {
+      mappings[name] = id;
+    });
+    return mappings;
+  }
+
+  /**
+   * Discover and cache all fields from Jira. Called once per session.
+   */
+  async discoverFields(): Promise<void> {
+    if (this.fieldCacheLoaded) return;
+    try {
+      const fields = (await this.request(
+        'GET',
+        '/rest/api/2/field',
+      )) as unknown as Array<Record<string, unknown>>;
+
+      for (const f of fields) {
+        const name = (f.name as string || '').toLowerCase();
+        const id = f.id as string;
+        if (name && id) {
+          this.fieldCache.set(name, id);
+        }
+      }
+      this.fieldCacheLoaded = true;
+      console.log(`[JiraService] Cached ${this.fieldCache.size} field mappings`);
+    } catch (err) {
+      console.error('[JiraService] Failed to discover fields:', err);
+    }
   }
 
   /**
