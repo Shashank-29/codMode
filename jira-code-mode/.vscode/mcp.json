@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "id": "jira-pat",
+      "type": "promptString",
+      "description": "Jira Personal Access Token (PAT)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "jiraCodeMode": {
+      "type": "http",
+      "url": "http://localhost:3001/mcp",
+      "headers": {
+        "X-Jira-PAT": "${input:jira-pat}"
+      }
+    }
+  }
+}
