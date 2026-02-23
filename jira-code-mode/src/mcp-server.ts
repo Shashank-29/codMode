@@ -45,17 +45,86 @@ function createMcpServer(jiraService: JiraService): McpServer {
     version: '1.0.0',
   });
 
+  // ── Tool: jira_discover ────────────────────────────────────
+  server.tool(
+    'jira_discover',
+    `Discover your Jira instance: lists project KEYS, issue types, and statuses.
+IMPORTANT: Call this FIRST before jira_search to get the correct project KEY.
+Returns compact data only. For custom fields or components, use code_execution instead.`,
+    {
+      scope: z
+        .enum(['projects', 'issuetypes', 'statuses'])
+        .describe('What to discover: projects (keys+names), issuetypes, or statuses'),
+    },
+    async ({scope}) => {
+      let lines: string[] = [];
+
+      if (scope === 'projects') {
+        const projects = (await jiraService.request(
+          'GET',
+          '/rest/api/2/project',
+        )) as unknown as Array<Record<string, unknown>>;
+        lines = projects.map(
+          (p: Record<string, unknown>) => `${p.key} — ${p.name}`,
+        );
+        lines.unshift(`${projects.length} projects found:`);
+      }
+
+      if (scope === 'issuetypes') {
+        const types = (await jiraService.request(
+          'GET',
+          '/rest/api/2/issuetype',
+        )) as unknown as Array<Record<string, unknown>>;
+        lines = types.map(
+          (t: Record<string, unknown>) =>
+            `${t.name}${t.subtask ? ' (sub-task)' : ''}`,
+        );
+        lines.unshift(`${types.length} issue types:`);
+      }
+
+      if (scope === 'statuses') {
+        const statuses = (await jiraService.request(
+          'GET',
+          '/rest/api/2/status',
+        )) as unknown as Array<Record<string, unknown>>;
+        lines = statuses.map(
+          (s: Record<string, unknown>) => {
+            const cat = (s.statusCategory as Record<string, unknown>)?.name || '';
+            return `${s.name} [${cat}]`;
+          },
+        );
+        lines.unshift(`${statuses.length} statuses:`);
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: lines.join('\n'),
+          },
+        ],
+      };
+    },
+  );
+
   // ── Tool: jira_search ──────────────────────────────────────
   server.tool(
     'jira_search',
     `Search Jira issues using JQL (Jira Query Language).
 Returns summarized issues with key, summary, status, assignee, priority.
-Examples:
-  - "project = TEST ORDER BY created DESC"
-  - "assignee = currentUser() AND status = Open"
-  - "type = Bug AND priority = High"`,
+
+IMPORTANT: JQL uses project KEYS (e.g. "MYAPP"), NOT project display names.
+If you don't know the project key, call jira_discover first with scope="projects".
+
+JQL examples:
+  - "project = MYAPP ORDER BY created DESC"
+  - "project = MYAPP AND status = 'In Progress'"
+  - "project = MYAPP AND component = 'Backend'"
+  - "assignee = currentUser() AND resolution = Unresolved"
+  - "type = Bug AND priority = High AND project = MYAPP"
+  - "sprint in openSprints() AND project = MYAPP"`,
     {
-      jql: z.string().describe('JQL query string'),
+      jql: z.string().describe('JQL query string using project KEYS not names'),
       maxResults: z
         .number()
         .optional()
@@ -80,11 +149,13 @@ Examples:
     `Execute a direct Jira REST API call.
 The path is relative to the Jira base URL. Common paths:
   - GET /rest/api/2/serverInfo — Server info
-  - GET /rest/api/2/issue/{key} — Get issue details
+  - GET /rest/api/2/issue/{key} — Get issue details (includes custom fields)
   - POST /rest/api/2/issue — Create issue
   - PUT /rest/api/2/issue/{key} — Update issue
   - GET /rest/api/2/project — List all projects
+  - GET /rest/api/2/project/{key} — Project details with components
   - GET /rest/api/2/issue/{key}/transitions — Get transitions
+  - GET /rest/api/2/field — List all fields (including custom)
 Note: write operations require JIRA_READONLY=false in .env`,
     {
       method: z.enum(['GET', 'POST', 'PUT', 'DELETE']).describe('HTTP method'),
@@ -116,14 +187,24 @@ Available inside the sandbox:
   - jira_api(method, path, body) — Async, makes direct Jira REST calls
   - console.log(...args) — Captured and returned
 
-Use this for multi-step Jira workflows:
-  - Search + filter + transform issues
-  - Bulk create/update operations
-  - Cross-issue analysis and reporting
-  - Chaining multiple API calls with logic
+IMPORTANT: JQL uses project KEYS not display names. If unsure, first discover:
+  const projects = await jira_api('GET', '/rest/api/2/project');
+  projects.forEach(p => console.log(p.key + ' = ' + p.name));
 
-Example: "const issues = await jira_search('project = TEST'); console.log(issues.length + ' issues found');"
+CUSTOM FIELDS (Story Points, Epic Link, etc.) — discover INSIDE the sandbox to avoid context rot:
+  const fields = await jira_api('GET', '/rest/api/2/field');
+  const sp = fields.find(f => f.name === 'Story Points');
+  console.log('Story Points ID: ' + sp.id);  // e.g. customfield_10001
 
+COMPONENTS (sub-projects) — discover inside sandbox:
+  const proj = await jira_api('GET', '/rest/api/2/project/MYAPP');
+  proj.components.forEach(c => console.log(c.name));
+
+ISSUE DETAILS with custom fields:
+  const issue = await jira_api('GET', '/rest/api/2/issue/MYAPP-123');
+  console.log('Story Points: ' + issue.fields.customfield_10001);
+
+Use this for multi-step Jira workflows, bulk operations, sprint health, workload reports.
 Timeout: 10s. Memory: 128MB. Write ops require JIRA_READONLY=false.`,
     {
       code: z.string().describe('JavaScript code to execute'),
