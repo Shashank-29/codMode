@@ -1,0 +1,309 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Task Manager API",
+    "description": "Simple task management microservice with CRUD operations, user management, and task statistics.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "http://localhost:4000", "description": "Local dev server" }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Health check",
+        "description": "Returns service health status and uptime.",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "service": { "type": "string", "example": "task-manager" },
+                    "uptime": { "type": "number", "example": 123.45 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "List all users",
+        "description": "Returns all users in the system.",
+        "responses": {
+          "200": {
+            "description": "List of users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/User" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "summary": "List tasks",
+        "description": "Returns all tasks, with optional filters by status, priority, assignee, or tag.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["todo", "in_progress", "done"] },
+            "description": "Filter by task status"
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+            "description": "Filter by priority level"
+          },
+          {
+            "name": "assignee",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Filter by assignee user ID"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Filter by tag"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Task" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "summary": "Create a new task",
+        "description": "Creates a task with the given details. Status defaults to 'todo'.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/tasks/stats": {
+      "get": {
+        "operationId": "getTaskStats",
+        "summary": "Get task statistics",
+        "description": "Returns aggregate statistics: total count, breakdown by status and priority, unassigned count.",
+        "responses": {
+          "200": {
+            "description": "Task statistics",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaskStats" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}": {
+      "get": {
+        "operationId": "getTask",
+        "summary": "Get a task by ID",
+        "description": "Returns full details of a single task.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "404": { "description": "Task not found" }
+        }
+      },
+      "put": {
+        "operationId": "updateTask",
+        "summary": "Update a task",
+        "description": "Updates the specified fields of a task.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated task",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } }
+          },
+          "404": { "description": "Task not found" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTask",
+        "summary": "Delete a task",
+        "description": "Permanently removes a task.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task deleted",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "deleted": { "type": "string" } } } } }
+          },
+          "404": { "description": "Task not found" }
+        }
+      }
+    },
+    "/api/tasks/{id}/assign": {
+      "post": {
+        "operationId": "assignTask",
+        "summary": "Assign a task to a user",
+        "description": "Sets the assignee of a task to the specified user.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["userId"],
+                "properties": {
+                  "userId": { "type": "string", "description": "User ID to assign the task to" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task assigned",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } }
+          },
+          "400": { "description": "Invalid user" },
+          "404": { "description": "Task not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "role": { "type": "string", "enum": ["developer", "manager", "qa"] }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["todo", "in_progress", "done"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "assignee": { "type": "string", "nullable": true },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateTaskRequest": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "assignee": { "type": "string" }
+        }
+      },
+      "UpdateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["todo", "in_progress", "done"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "TaskStats": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer" },
+          "byStatus": {
+            "type": "object",
+            "properties": {
+              "todo": { "type": "integer" },
+              "in_progress": { "type": "integer" },
+              "done": { "type": "integer" }
+            }
+          },
+          "byPriority": {
+            "type": "object",
+            "properties": {
+              "low": { "type": "integer" },
+              "medium": { "type": "integer" },
+              "high": { "type": "integer" },
+              "critical": { "type": "integer" }
+            }
+          },
+          "unassigned": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

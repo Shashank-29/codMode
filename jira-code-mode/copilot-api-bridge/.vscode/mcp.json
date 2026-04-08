@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "copilot-api-bridge": {
+      "command": "npx",
+      "args": ["tsx", "mcp-server.ts"],
+      // "cwd": "/Users/prshashank/My_projects/codMode/jira-code-mode/copilot-api-bridge",
+      "env": {
+        // "JIRA_URL": "https://your-domain.atlassian.net",
+        // "JIRA_PAT": "your-pat-here",
+        // "JIRA_READONLY": "true",
+        // "TASKS_URL": "http://localhost:4000/api",
+        // "TASKS_TOKEN": "mock_secret_token"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "core/**/*.ts",
+    "services/**/*.ts",
+    "scripts/**/*.ts",
+    "mcp-server.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "services/*/generated/**"
+  ]
+}

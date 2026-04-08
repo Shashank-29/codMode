@@ -1,0 +1,32 @@
+{
+  "name": "copilot-api-bridge",
+  "version": "0.1.0",
+  "description": "Reusable platform that turns any backend service's OpenAPI spec into a Copilot-accessible MCP interface",
+  "type": "module",
+  "main": "dist/mcp-server.js",
+  "scripts": {
+    "dev": "tsx mcp-server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "generate": "tsx scripts/generate.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "P R Shashank <shashanksurya2003@gmail.com>",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "dotenv": "^17.3.1",
+    "fuse.js": "^7.1.0",
+    "isolated-vm": "^6.0.2",
+    "mssql": "^12.2.1"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.11",
+    "@types/node": "^22.0.0",
+    "swagger-typescript-api": "^13.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.6.0"
+  }
+}
